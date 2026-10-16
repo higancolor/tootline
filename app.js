@@ -4,7 +4,7 @@
 
 const APP_NAME = 'Tootline';
 const SCOPES = 'read write push';
-const VERSION = '0.5';
+const VERSION = '0.6';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 const POLL_MS = 30000;      // 画面を開いている間の取りこぼし確認の間隔
 const KEEP = 300;           // 1つのタイムラインに保持する最大件数
@@ -216,6 +216,8 @@ function sanitize(html, emojis) {
   return out;
 }
 
+// 名前をタップするとその人のプロフィールが開く
+const whoNode = (acc) => { const n = nameNode(acc); n.addEventListener('click', () => openProfile(acc.id)); return n; };
 const nameNode = (acc) => el('span', { class: 'nm' }, ...withEmoji(acc.display_name || acc.username, acc.emojis));
 const VIS = { unlisted: 'ひかえめ', private: '限定', direct: 'DM' };
 const ICON = {
@@ -337,7 +339,7 @@ function renderStatus(st, { notice } = {}) {
   const root = el('article', { class: 'post' + (st.reblog ? ' boosted' : ''), 'data-oid': s.id });
   const body = el('div', { class: 'pb' });
   if (notice) body.append(el('div', { class: 'hint' }, notice));
-  else if (st.reblog) body.append(el('div', { class: 'hint' }, nameNode(st.account), 'がブースト'));
+  else if (st.reblog) body.append(el('div', { class: 'hint' }, whoNode(st.account), 'がブースト'));
   const hd = el('div', { class: 'hd' }, nameNode(a), el('span', { class: 'ac', text: '@' + a.acct }));
   if (VIS[s.visibility]) hd.append(el('span', { class: 'vis', text: VIS[s.visibility] }));
   if (s.edited_at) hd.append(el('span', { class: 'vis', text: '編集済み' }));
@@ -364,13 +366,13 @@ const NOTICE = {
 };
 function renderNotification(n) {
   if (n.type === 'mention' && n.status) {
-    const e = renderStatus(n.status, { notice: el('span', {}, nameNode(n.account), 'からの返信・メンション') });
+    const e = renderStatus(n.status, { notice: el('span', {}, whoNode(n.account), 'からの返信・メンション') });
     e.classList.add('notice');
     return e;
   }
   const label = NOTICE[n.type] || (n.type || '通知');
   if (n.status) {
-    const e = renderStatus(n.status, { notice: el('span', {}, nameNode(n.account), label) });
+    const e = renderStatus(n.status, { notice: el('span', {}, whoNode(n.account), label) });
     e.classList.add('notice');
     return e;
   }
