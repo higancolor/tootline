@@ -1,11 +1,12 @@
 // Tootline service worker: アプリ本体(HTML/CSS/JS)だけをキャッシュする。
 // Mastodon のAPI(別ドメイン)には一切触れない。
-const CACHE = 'tootline-v3';
+const CACHE = 'tootline-v4';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' … ブラウザの古い一時保存を使わず、必ず最新のファイルを取りに行く
+  e.waitUntil(caches.open(CACHE).then((c) => Promise.all(SHELL.map((u) => c.add(new Request(u, { cache: 'reload' }))))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -24,7 +25,7 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const hit = await cache.match(req, { ignoreSearch: true });
-      const net = fetch(req).then((res) => {
+      const net = fetch(req, { cache: 'no-cache' }).then((res) => {
         if (res.ok) cache.put(req, res.clone());
         return res;
       }).catch(() => hit);
