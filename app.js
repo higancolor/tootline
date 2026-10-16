@@ -4,7 +4,7 @@
 
 const APP_NAME = 'Tootline';
 const SCOPES = 'read write push';
-const VERSION = '0.2';
+const VERSION = '0.4';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 const POLL_MS = 30000;      // 画面を開いている間の取りこぼし確認の間隔
 const KEEP = 300;           // 1つのタイムラインに保持する最大件数
@@ -221,6 +221,7 @@ const VIS = { unlisted: 'ひかえめ', private: '限定', direct: 'DM' };
 const ICON = {
   reply: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 6 6v3"/>',
   boost: '<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   fav: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.2 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/>',
 };
 function icon(name) {
@@ -263,12 +264,18 @@ function openViewer(m) {
 $('#viewer').addEventListener('click', () => { const v = $('#viewer'); v.hidden = true; v.textContent = ''; });
 
 function actBtn(kind, label, count, on, handler) {
-  return el('button', { class: `act ${kind}${on ? ' on' : ''}`, type: 'button', 'aria-label': label, 'aria-pressed': kind === 'reply' ? null : String(!!on), onclick: handler },
+  return el('button', { class: `act ${kind}${on ? ' on' : ''}`, type: 'button', 'aria-label': label, 'aria-pressed': (kind === 'reply' || kind === 'edit') ? null : String(!!on), onclick: handler },
     icon(kind), el('span', { class: 'n', text: count > 0 ? String(count) : '' }));
 }
 
 function contentBlock(s) {
   const body = el('div', { class: 'content' }, sanitize(s.content, s.emojis));
+  body.addEventListener('click', (e) => {
+    const link = e.target.closest('a.mention');
+    if (!link) return;
+    const m = (s.mentions || []).find((x) => x.url === link.getAttribute('href'));
+    if (m) { e.preventDefault(); openProfile(m.id); }
+  });
   if (!s.spoiler_text) return body;
   const wrap = el('div', { class: 'cw' }, el('div', { class: 'cw-t' }, ...withEmoji(s.spoiler_text, s.emojis)));
   body.hidden = true;
@@ -287,7 +294,9 @@ function renderStatus(st, { notice } = {}) {
   else if (st.reblog) body.append(el('div', { class: 'hint' }, nameNode(st.account), 'がブースト'));
   const hd = el('div', { class: 'hd' }, nameNode(a), el('span', { class: 'ac', text: '@' + a.acct }));
   if (VIS[s.visibility]) hd.append(el('span', { class: 'vis', text: VIS[s.visibility] }));
+  if (s.edited_at) hd.append(el('span', { class: 'vis', text: '編集済み' }));
   hd.append(el('a', { class: 'tm', href: s.url || s.uri, target: '_blank', rel: 'noopener', 'data-t': s.created_at, text: ago(s.created_at) }));
+  for (const n of hd.querySelectorAll('.nm, .ac')) n.addEventListener('click', () => openProfile(a.id));
   body.append(hd, contentBlock(s));
   const mb = mediaBlock(s); if (mb) body.append(mb);
   if (s.poll) body.append(el('div', { class: 'poll', text: '投票つき(このバージョンでは表示のみ・投票はブラウザで)' }));
@@ -295,8 +304,11 @@ function renderStatus(st, { notice } = {}) {
     actBtn('reply', '返信', s.replies_count, false, () => openCompose(s)),
     actBtn('boost', 'ブースト', s.reblogs_count, s.reblogged, (e) => toggle(s, 'reblog', e.currentTarget)),
     actBtn('fav', 'お気に入り', s.favourites_count, s.favourited, (e) => toggle(s, 'favourite', e.currentTarget)));
+  if (S && S.me && a.id === S.me.id) acts.append(actBtn('edit', '編集', 0, false, () => openEdit(s)));
   body.append(acts);
-  root.append(el('span', { class: 'node' }), el('img', { class: 'av', src: a.avatar_static || a.avatar, alt: '', loading: 'lazy' }), body);
+  const av = el('img', { class: 'av', src: a.avatar_static || a.avatar, alt: '', loading: 'lazy' });
+  av.addEventListener('click', () => openProfile(a.id));
+  root.append(el('span', { class: 'node' }), av, body);
   return root;
 }
 
@@ -318,9 +330,12 @@ function renderNotification(n) {
   }
   const a = n.account;
   const root = el('article', { class: 'post notice' });
-  root.append(el('span', { class: 'node' }), el('img', { class: 'av', src: a.avatar_static || a.avatar, alt: '', loading: 'lazy' }),
+  const nav = el('img', { class: 'av', src: a.avatar_static || a.avatar, alt: '', loading: 'lazy' });
+  nav.addEventListener('click', () => openProfile(a.id));
+  const nname = nameNode(a); nname.addEventListener('click', () => openProfile(a.id));
+  root.append(el('span', { class: 'node' }), nav,
     el('div', { class: 'pb' },
-      el('div', { class: 'hd' }, nameNode(a), el('span', { class: 'ac', text: '@' + a.acct }),
+      el('div', { class: 'hd' }, nname, el('span', { class: 'ac', text: '@' + a.acct }),
         el('span', { class: 'tm', 'data-t': n.created_at, text: ago(n.created_at) })),
       el('div', { class: 'content' }, label)));
   return root;
@@ -589,10 +604,11 @@ function show(k) {
 }
 
 /* ---------- 投稿 ---------- */
-const C = { reply: null, media: [], key: null, sending: false };
+const C = { reply: null, edit: null, media: [], key: null, sending: false };
 const cText = $('#cText'), cVis = $('#cVis'), cCw = $('#cCw'), cSend = $('#cSend'), cCount = $('#cCount');
 
 function openCompose(replyTo) {
+  if (C.edit) resetComposer();
   C.reply = replyTo || null;
   C.key = rand(12);
   const box = $('#cReply');
@@ -614,6 +630,32 @@ function openCompose(replyTo) {
 function sanitizeText(html) { const d = new DOMParser().parseFromString(html, 'text/html'); return d.body.textContent.slice(0, 120); }
 
 function closeCompose() { $('#composer').hidden = true; }
+
+function resetComposer() {
+  cText.value = ''; cCw.value = ''; cCw.hidden = true; $('#cSens').checked = false; $('#cCwBtn').setAttribute('aria-pressed', 'false');
+  C.media = []; C.reply = null; C.edit = null; cVis.disabled = false; cSend.textContent = '投稿する';
+  renderMedia();
+}
+
+async function openEdit(s) {
+  if (s.poll) { toast('投票つきの投稿は、このバージョンでは編集できません。'); return; }
+  let src;
+  try { src = await api(`/api/v1/statuses/${s.id}/source`); }
+  catch (e) { toast(`編集を始められませんでした: ${e.message}`); return; }
+  resetComposer();
+  C.edit = s; C.key = null;
+  cText.value = src.text || '';
+  if (src.spoiler_text) { cCw.hidden = false; cCw.value = src.spoiler_text; $('#cCwBtn').setAttribute('aria-pressed', 'true'); }
+  cVis.value = s.visibility; cVis.disabled = true;
+  C.media = (s.media_attachments || []).map((m) => ({ id: m.id, existing: true, type: m.type, preview: m.preview_url || m.url, alt: m.description || '', origAlt: m.description || '' }));
+  $('#cSens').checked = !!s.sensitive;
+  const box = $('#cReply'); box.hidden = false; box.textContent = '投稿を編集中です。編集した履歴は、ほかの人にも見えることがあります。';
+  cSend.textContent = '保存する';
+  renderMedia();
+  $('#composer').hidden = false;
+  fitComposer(); updateCompose();
+  setTimeout(() => { cText.focus(); }, 50);
+}
 
 function countChars() {
   const t = cText.value.replace(/https?:\/\/\S+/g, 'x'.repeat(23)).replace(/(^|\s)@([\w.-]+)@[\w.-]+/g, '$1@$2');
@@ -640,7 +682,7 @@ if (window.visualViewport) {
   window.visualViewport.addEventListener('scroll', fitComposer);
 }
 
-cText.addEventListener('input', () => { if (!C.reply) store.set('tl.draft', cText.value); updateCompose(); });
+cText.addEventListener('input', () => { if (!C.reply && !C.edit) store.set('tl.draft', cText.value); updateCompose(); });
 cCw.addEventListener('input', updateCompose);
 cVis.addEventListener('change', () => store.set('tl.vis', cVis.value));
 $('#cCwBtn').addEventListener('click', (e) => {
@@ -649,7 +691,7 @@ $('#cCwBtn').addEventListener('click', (e) => {
   if (!cCw.hidden) cCw.focus(); else cCw.value = '';
   updateCompose();
 });
-$('#cCancel').addEventListener('click', closeCompose);
+$('#cCancel').addEventListener('click', () => { if (C.edit) resetComposer(); closeCompose(); });
 
 $('#cFile').addEventListener('change', async (e) => {
   const files = [...e.target.files]; e.target.value = '';
@@ -677,8 +719,8 @@ $('#cFile').addEventListener('change', async (e) => {
 function renderMedia() {
   const box = $('#cMedia'); box.textContent = '';
   for (const m of C.media) {
-    const isVid = m.file.type.startsWith('video/');
-    const url = URL.createObjectURL(m.file);
+    const isVid = m.file ? m.file.type.startsWith('video/') : false;
+    const url = m.file ? URL.createObjectURL(m.file) : m.preview;
     const pv = el('div', { class: 'pv' }, isVid ? el('video', { src: url, muted: true, playsinline: true }) : el('img', { src: url, alt: '' }));
     if (!m.id) pv.append(el('div', { class: 'busy', text: '送信中…' }));
     pv.append(el('button', { class: 'x', type: 'button', 'aria-label': '添付を外す', text: '×', onclick: () => { C.media.splice(C.media.indexOf(m), 1); renderMedia(); updateCompose(); } }));
@@ -692,7 +734,18 @@ cSend.addEventListener('click', async () => {
   if (cSend.disabled) return;
   C.sending = true; updateCompose();
   try {
-    for (const m of C.media) if (m.alt.trim()) await api(`/api/v1/media/${m.id}`, { method: 'PUT', body: { description: m.alt.trim() } });
+    for (const m of C.media) if (!m.existing && m.alt.trim()) await api(`/api/v1/media/${m.id}`, { method: 'PUT', body: { description: m.alt.trim() } });
+    if (C.edit) {
+      const e = C.edit;
+      const body = { status: cText.value, spoiler_text: cCw.hidden ? '' : cCw.value.trim(), language: e.language || 'ja',
+        sensitive: C.media.length ? $('#cSens').checked : false, media_ids: C.media.map((m) => m.id) };
+      const attrs = C.media.filter((m) => m.existing && m.alt.trim() !== m.origAlt).map((m) => ({ id: m.id, description: m.alt.trim() }));
+      if (attrs.length) body.media_attributes = attrs;
+      const upd = await api(`/api/v1/statuses/${e.id}`, { method: 'PUT', body });
+      replaceStatus(upd);
+      resetComposer(); closeCompose(); toast('保存しました');
+      return;
+    }
     const body = { status: cText.value, visibility: cVis.value, language: 'ja', __key: C.key };
     if (C.reply) body.in_reply_to_id = C.reply.id;
     if (!cCw.hidden && cCw.value.trim()) body.spoiler_text = cCw.value.trim();
@@ -705,10 +758,182 @@ cSend.addEventListener('click', async () => {
     toast('投稿しました');
     fetchNewer(COLS.home);
   } catch (e) {
-    toast(`投稿できませんでした: ${e.message}`);
+    toast(`${C.edit ? '保存' : '投稿'}できませんでした: ${e.message}`);
   } finally { C.sending = false; updateCompose(); }
 });
 
+
+
+/* ---------- プロフィール(投稿した人のページ・自分のページ) ---------- */
+const PROFILE_CSS = `
+.av, .nm, .ac { cursor: pointer; }
+.prof { position: fixed; inset: 0; z-index: 25; background: var(--bg); display: flex; flex-direction: column; --line: var(--home); }
+.prof-bar { flex: none; display: flex; align-items: center; gap: 6px; height: calc(var(--bar-h) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 6px; background: var(--surface); border-bottom: 3px solid var(--line); }
+.prof-bar button { border: 0; background: none; padding: 8px 10px; font-weight: 700; font-size: 15px; }
+.prof-bar h2 { margin: 0; font-size: 16px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prof-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+.prof-hdr { height: 110px; background: var(--rule) center / cover no-repeat; }
+.prof-main { padding: 0 16px 14px; background: var(--surface); border-bottom: 1px solid var(--rule); }
+.prof-top { display: flex; align-items: flex-end; justify-content: space-between; margin-top: -34px; }
+.prof-av { width: 72px; height: 72px; border-radius: 14px; border: 3px solid var(--surface); background: var(--rule); object-fit: cover; display: block; }
+.prof-name { font-size: 19px; font-weight: 800; margin: 8px 0 0; overflow-wrap: anywhere; line-height: 1.3; }
+.prof-acct { color: var(--sub); font-size: 13.5px; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.fbtn { border: 1px solid var(--ink); background: var(--ink); color: var(--bg); border-radius: 8px; padding: 7px 16px; font-weight: 700; }
+.fbtn.on { background: none; color: var(--ink); }
+.fbtn:disabled { opacity: .4; }
+.prof-note { margin-top: 10px; }
+.prof-fields { margin: 10px 0 0; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+.prof-fields > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 6px 10px; border-top: 1px solid var(--rule); font-size: 13.5px; }
+.prof-fields > div:first-child { border-top: 0; }
+.prof-fields dt { color: var(--sub); font-weight: 600; overflow-wrap: anywhere; }
+.prof-fields dd { margin: 0; overflow-wrap: anywhere; }
+.prof-fields a { color: var(--line); text-decoration: none; }
+.prof-counts { display: flex; gap: 18px; margin-top: 10px; color: var(--sub); font-size: 13.5px; }
+.prof-counts b { color: var(--ink); font-size: 15px; margin-right: 3px; }
+.prof-tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--rule); }
+.prof-tabs button { flex: 1; padding: 10px 4px; border: 0; background: none; color: var(--sub); font-weight: 600; border-bottom: 3px solid transparent; }
+.prof-tabs button[aria-current="true"] { color: var(--ink); border-bottom-color: var(--line); }
+`;
+(function injectProfileStyles() {
+  const st = document.createElement('style'); st.textContent = PROFILE_CSS; document.head.append(st);
+})();
+
+const Prof = { stack: [], box: null, token: 0, id: null, tab: 'posts', oldest: null, ended: false, loading: false, list: null, state: null, scroller: null, rel: null };
+const PROF_TABS = { posts: { label: '投稿', params: { exclude_replies: 'true' } }, replies: { label: '返信も', params: {} }, media: { label: 'メディア', params: { only_media: 'true' } } };
+
+function ensureProfileBox() {
+  if (Prof.box) return Prof.box;
+  const back = el('button', { type: 'button', text: '← 戻る', 'aria-label': '戻る' });
+  back.addEventListener('click', () => history.back());
+  Prof.title = el('h2');
+  Prof.scroller = el('div', { class: 'prof-scroll' });
+  Prof.scroller.addEventListener('scroll', () => {
+    const sc = Prof.scroller;
+    if (sc.scrollHeight - sc.scrollTop - sc.clientHeight < 700) loadProfilePosts();
+  }, { passive: true });
+  Prof.box = el('section', { class: 'prof', hidden: true, 'aria-label': 'プロフィール' },
+    el('div', { class: 'prof-bar' }, back, Prof.title), Prof.scroller);
+  document.body.append(Prof.box);
+  return Prof.box;
+}
+
+function openProfile(id) {
+  if (!id) return;
+  const box = ensureProfileBox();
+  if (Prof.stack[Prof.stack.length - 1] === id && !box.hidden) return;
+  Prof.stack.push(id);
+  history.pushState({ tl: 'prof', n: Prof.stack.length }, '');
+  box.hidden = false;
+  renderProfile(id);
+}
+
+window.addEventListener('popstate', (e) => {
+  if (!Prof.box) return;
+  const n = e.state && e.state.tl === 'prof' ? e.state.n : 0;
+  Prof.stack.length = Math.min(Prof.stack.length, n);
+  if (n === 0) { Prof.box.hidden = true; Prof.token++; return; }
+  renderProfile(Prof.stack[n - 1]);
+});
+
+const num = (n) => Number(n || 0).toLocaleString('ja-JP');
+
+async function renderProfile(id) {
+  const my = ++Prof.token;
+  Prof.id = id; Prof.tab = 'posts'; Prof.oldest = null; Prof.ended = false; Prof.loading = false;
+  Prof.title.textContent = '';
+  const sc = Prof.scroller; sc.textContent = ''; sc.scrollTop = 0;
+  sc.append(el('div', { class: 'state', text: '読み込み中…' }));
+  let acc, rel = null;
+  try {
+    const isMe = S.me && id === S.me.id;
+    [acc, rel] = await Promise.all([
+      api(`/api/v1/accounts/${id}`),
+      isMe ? null : api('/api/v1/accounts/relationships', { params: { 'id[]': id } }).then((r) => r[0] || null).catch(() => null),
+    ]);
+  } catch (e) {
+    if (my !== Prof.token) return;
+    sc.textContent = ''; sc.append(el('div', { class: 'state', text: `読み込めませんでした: ${e.message}` }));
+    return;
+  }
+  if (my !== Prof.token) return;
+  Prof.rel = rel;
+  Prof.title.replaceChildren(...withEmoji(acc.display_name || acc.username, acc.emojis));
+  sc.textContent = '';
+
+  const hdr = el('div', { class: 'prof-hdr' });
+  const hdrUrl = acc.header_static || acc.header;
+  if (hdrUrl && !/missing\.png$/.test(hdrUrl)) hdr.style.backgroundImage = `url("${hdrUrl.replace(/"/g, '%22')}")`;
+  const top = el('div', { class: 'prof-top' }, el('img', { class: 'prof-av', src: acc.avatar_static || acc.avatar, alt: '' }));
+  if (rel) {
+    const fb = el('button', { type: 'button', class: 'fbtn' });
+    const paint = () => {
+      const r = Prof.rel || {};
+      fb.className = 'fbtn' + (r.following || r.requested ? ' on' : '');
+      fb.textContent = r.following ? 'フォロー中' : r.requested ? 'リクエスト済み' : 'フォローする';
+    };
+    paint();
+    fb.addEventListener('click', async () => {
+      const r = Prof.rel || {}; fb.disabled = true;
+      try { Prof.rel = await api(`/api/v1/accounts/${id}/${r.following || r.requested ? 'unfollow' : 'follow'}`, { method: 'POST' }); }
+      catch (e) { toast(`操作できませんでした: ${e.message}`); }
+      fb.disabled = false; paint();
+    });
+    top.append(fb);
+  }
+  const acctLine = el('div', { class: 'prof-acct' }, '@' + acc.acct);
+  if (rel && rel.followed_by) acctLine.append(el('span', { class: 'vis', text: 'フォローされています' }));
+  if (acc.locked) acctLine.append(el('span', { class: 'vis', text: '承認制' }));
+  if (acc.bot) acctLine.append(el('span', { class: 'vis', text: 'Bot' }));
+  const main = el('div', { class: 'prof-main' }, top,
+    el('h3', { class: 'prof-name' }, ...withEmoji(acc.display_name || acc.username, acc.emojis)), acctLine);
+  if (acc.note && acc.note !== '<p></p>') main.append(el('div', { class: 'content prof-note' }, sanitize(acc.note, acc.emojis)));
+  const fields = (acc.fields || []).filter((f) => f.name);
+  if (fields.length) {
+    const dl = el('dl', { class: 'prof-fields' });
+    for (const f of fields) dl.append(el('div', {}, el('dt', {}, ...withEmoji(f.name, acc.emojis)), el('dd', {}, sanitize(f.value, acc.emojis))));
+    main.append(dl);
+  }
+  main.append(el('div', { class: 'prof-counts' },
+    el('span', {}, el('b', { text: num(acc.statuses_count) }), '投稿'),
+    el('span', {}, el('b', { text: num(acc.following_count) }), 'フォロー'),
+    el('span', {}, el('b', { text: num(acc.followers_count) }), 'フォロワー')));
+
+  const tabs = el('div', { class: 'prof-tabs', role: 'tablist' });
+  for (const [k, t] of Object.entries(PROF_TABS)) {
+    const b = el('button', { type: 'button', role: 'tab', 'aria-current': String(k === Prof.tab), text: t.label });
+    b.addEventListener('click', () => {
+      if (Prof.tab === k) return;
+      Prof.tab = k; Prof.oldest = null; Prof.ended = false;
+      for (const x of tabs.children) x.setAttribute('aria-current', String(x === b));
+      Prof.list.textContent = '';
+      loadProfilePosts();
+    });
+    tabs.append(b);
+  }
+  Prof.list = el('ul', { class: 'list' });
+  Prof.state = el('div', { class: 'state', text: '読み込み中…' });
+  sc.append(hdr, main, tabs, Prof.list, Prof.state);
+  loadProfilePosts();
+}
+
+async function loadProfilePosts() {
+  if (Prof.loading || Prof.ended || !Prof.list) return;
+  Prof.loading = true;
+  const my = Prof.token, tab = Prof.tab, first = !Prof.oldest;
+  try {
+    const r = await api(`/api/v1/accounts/${Prof.id}/statuses`, { params: { ...PROF_TABS[tab].params, limit: 20, max_id: Prof.oldest } });
+    if (my !== Prof.token || tab !== Prof.tab) return;
+    for (const st of r) {
+      const li = el('li', { 'data-id': st.id }); li.append(renderStatus(st)); Prof.list.append(li);
+    }
+    if (r.length) Prof.oldest = minId(r);
+    if (r.length < 5) Prof.ended = true;
+    Prof.state.hidden = Prof.list.children.length > 0;
+    if (!Prof.list.children.length) Prof.state.textContent = '投稿はありません。';
+  } catch (e) {
+    if (first && my === Prof.token) { Prof.state.hidden = false; Prof.state.textContent = `読み込めませんでした: ${e.message}`; }
+  } finally { Prof.loading = false; }
+}
 
 /* ---------- プッシュ通知(アプリを閉じていても届く) ---------- */
 const PUSH_KINDS = ['mention', 'reblog', 'favourite', 'follow'];
@@ -856,6 +1081,11 @@ async function boot() {
   $('#composeBtn').addEventListener('click', () => openCompose(null));
   $('#meBtn').addEventListener('click', () => { $('#menuWho').textContent = `@${S.me.acct}@${S.host}`; $('#menu').hidden = false; refreshPushUi(); });
   $('#ver').textContent = `Tootline ${VERSION}`;
+  if (S.me && S.me.id) {
+    const pb = el('button', { type: 'button', id: 'profBtn', text: '自分のプロフィール' });
+    pb.addEventListener('click', () => { $('#menu').hidden = true; openProfile(S.me.id); });
+    $('#menuWho').after(pb);
+  }
   wirePush();
   $('#menuClose').addEventListener('click', () => { $('#menu').hidden = true; });
   $('#menu').addEventListener('click', (e) => { if (e.target.id === 'menu') $('#menu').hidden = true; });
