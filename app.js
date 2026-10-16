@@ -4,7 +4,7 @@
 
 const APP_NAME = 'Tootline';
 const SCOPES = 'read write push';
-const VERSION = '0.4';
+const VERSION = '0.5';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 const POLL_MS = 30000;      // 画面を開いている間の取りこぼし確認の間隔
 const KEEP = 300;           // 1つのタイムラインに保持する最大件数
@@ -247,21 +247,67 @@ function mediaBlock(s) {
     const b = el('button', { class: 'm' + (sens ? ' sens' : ''), type: 'button', 'aria-label': m.description || '添付メディアを開く' }, inner);
     b.addEventListener('click', () => {
       if (b.classList.contains('sens')) { b.classList.remove('sens'); return; }
-      openViewer(m);
+      openViewer(items, items.indexOf(m));
     });
     box.append(b);
   }
   return box;
 }
 
-function openViewer(m) {
+const VW_CSS = `
+.viewer { display: block; padding: 0; background: rgba(0,0,0,.94); }
+.vw-track { position: absolute; inset: 0; display: flex; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; scrollbar-width: none; }
+.vw-track::-webkit-scrollbar { display: none; }
+.vw-slide { flex: 0 0 100%; width: 100%; height: 100%; scroll-snap-align: center; scroll-snap-stop: always; display: grid; place-items: center; padding: calc(env(safe-area-inset-top) + 60px) 0 calc(env(safe-area-inset-bottom) + 24px); }
+.vw-slide img, .vw-slide video { max-width: 100%; max-height: 100%; object-fit: contain; }
+.vw-close { position: absolute; top: calc(env(safe-area-inset-top) + 10px); right: 12px; z-index: 2; width: 44px; height: 44px; border: 0; border-radius: 50%; background: rgba(255,255,255,.2); color: #fff; font-size: 28px; line-height: 1; padding: 0; }
+.vw-count { position: absolute; top: calc(env(safe-area-inset-top) + 21px); left: 16px; z-index: 2; color: #fff; font-size: 14px; font-variant-numeric: tabular-nums; }
+`;
+(function injectViewerStyles() { const st = document.createElement('style'); st.textContent = VW_CSS; document.head.append(st); })();
+
+function closeViewer() {
   const v = $('#viewer');
-  v.textContent = '';
-  if (m.type === 'video' || m.type === 'gifv') v.append(el('video', { src: m.url, controls: true, autoplay: true, playsinline: true, ...(m.type === 'gifv' ? { loop: true } : {}) }));
-  else v.append(el('img', { src: m.url, alt: m.description || '' }));
-  v.hidden = false;
+  for (const x of v.querySelectorAll('video')) x.pause();
+  v.hidden = true; v.textContent = '';
+  document.removeEventListener('keydown', onViewerKey);
 }
-$('#viewer').addEventListener('click', () => { const v = $('#viewer'); v.hidden = true; v.textContent = ''; });
+function onViewerKey(e) { if (e.key === 'Escape') closeViewer(); }
+
+// 画像・動画ビューア: 左右スワイプで同じ投稿の次の画像へ。右上の×で元の画面に戻る
+function openViewer(items, start = 0) {
+  const v = $('#viewer'); v.textContent = '';
+  const track = el('div', { class: 'vw-track' });
+  const count = el('div', { class: 'vw-count' });
+  for (const m of items) {
+    const isVid = m.type === 'video' || m.type === 'gifv';
+    const media = isVid
+      ? el('video', { src: m.url, controls: m.type === 'video', playsinline: true, preload: 'metadata', ...(m.type === 'gifv' ? { loop: true, muted: true } : {}) })
+      : el('img', { src: m.url, alt: m.description || '' });
+    const slide = el('div', { class: 'vw-slide' }, media);
+    slide.addEventListener('click', (e) => { if (e.target === slide) closeViewer(); });
+    track.append(slide);
+  }
+  const close = el('button', { class: 'vw-close', type: 'button', 'aria-label': '閉じる', text: '×' });
+  close.addEventListener('click', closeViewer);
+  v.append(track, count, close);
+  v.hidden = false;
+  const index = () => Math.round(track.scrollLeft / (track.clientWidth || 1));
+  const sync = () => {
+    const i = index();
+    count.textContent = items.length > 1 ? `${i + 1} / ${items.length}` : '';
+    [...track.children].forEach((s, k) => {
+      const vid = s.querySelector('video');
+      if (!vid) return;
+      if (k === i) { if (vid.loop) vid.play().catch(() => {}); } else vid.pause();
+    });
+  };
+  track.addEventListener('scroll', sync, { passive: true });
+  track.scrollLeft = start * track.clientWidth;
+  sync();
+  const first = track.children[start] && track.children[start].querySelector('video');
+  if (first) first.play().catch(() => {});
+  document.addEventListener('keydown', onViewerKey);
+}
 
 function actBtn(kind, label, count, on, handler) {
   return el('button', { class: `act ${kind}${on ? ' on' : ''}`, type: 'button', 'aria-label': label, 'aria-pressed': (kind === 'reply' || kind === 'edit') ? null : String(!!on), onclick: handler },
