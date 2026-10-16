@@ -53,9 +53,21 @@
 <div id="menu" class="menu" hidden>
   <div class="menu-card">
     <p id="menuWho"></p>
+    <section class="push" aria-label="通知">
+      <button id="pushBtn" type="button" disabled>通知</button>
+      <p id="pushNote" class="note"></p>
+      <fieldset id="pushKinds" hidden>
+        <legend>通知する種類</legend>
+        <label><input type="checkbox" id="pk-mention"> 返信・メンション</label>
+        <label><input type="checkbox" id="pk-reblog"> ブースト</label>
+        <label><input type="checkbox" id="pk-favourite"> お気に入り</label>
+        <label><input type="checkbox" id="pk-follow"> フォロー</label>
+      </fieldset>
+    </section>
     <button id="reloadBtn">タイムラインを読み込み直す</button>
     <button id="logoutBtn" class="danger">ログアウト</button>
     <button id="menuClose">閉じる</button>
+    <p id="ver" class="note"></p>
   </div>
 </div>
 

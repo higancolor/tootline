@@ -1,6 +1,6 @@
 // Tootline service worker: アプリ本体(HTML/CSS/JS)だけをキャッシュする。
 // Mastodon のAPI(別ドメイン)には一切触れない。
-const CACHE = 'tootline-v2';
+const CACHE = 'tootline-v3';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
@@ -31,4 +31,28 @@ self.addEventListener('fetch', (e) => {
       return hit || net;
     })
   );
+});
+
+// ---- プッシュ通知(Mastodon から Apple/Google の通知サーバー経由で届く) ----
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : '' }; }
+  // iPhoneは、届いた通知を必ず表示しないと購読を取り消されるので、常に表示する
+  e.waitUntil(self.registration.showNotification(d.title || 'Tootline', {
+    body: d.body || '',
+    icon: d.icon || 'icon-192.png',
+    badge: 'icon-192.png',
+    tag: d.notification_id ? 'n' + d.notification_id : undefined,
+    data: { id: d.notification_id || null },
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    for (const c of list) {
+      if ('focus' in c) { c.postMessage({ type: 'open-notif' }); return c.focus(); }
+    }
+    return self.clients.openWindow('./?tab=notif');
+  }));
 });

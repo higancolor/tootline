@@ -3,7 +3,8 @@
    外部ライブラリなし。ログイン情報はこの端末のlocalStorageにだけ保存される。 */
 
 const APP_NAME = 'Tootline';
-const SCOPES = 'read write';
+const SCOPES = 'read write push';
+const VERSION = '0.2';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 const POLL_MS = 30000;      // 画面を開いている間の取りこぼし確認の間隔
 const KEEP = 300;           // 1つのタイムラインに保持する最大件数
@@ -92,7 +93,7 @@ async function startLogin(rawHost) {
   if (!host || !/^[a-z0-9.-]+(:\d+)?$/.test(host)) throw new Error('ドメインの形が正しくありません。例: mstdn.jp');
   const apps = store.get('tl.apps') || {};
   let app = apps[host];
-  if (!app || app.redirect !== REDIRECT) {
+  if (!app || app.redirect !== REDIRECT || app.scopes !== SCOPES) {
     let r;
     try {
       r = await fetch(httpBase(host) + '/api/v1/apps', {
@@ -102,7 +103,7 @@ async function startLogin(rawHost) {
     } catch { throw new Error(`${host} に接続できません。ドメインを確かめてください。`); }
     if (!r.ok) throw new Error(`${host} がアプリの登録を受け付けませんでした(${r.status})。`);
     const j = await r.json();
-    app = { client_id: j.client_id, client_secret: j.client_secret, redirect: REDIRECT };
+    app = { client_id: j.client_id, client_secret: j.client_secret, redirect: REDIRECT, scopes: SCOPES, vapid: j.vapid_key || null };
     apps[host] = app; store.set('tl.apps', apps);
   }
   const verifier = rand(48), state = rand(16);
@@ -127,7 +128,7 @@ async function finishLogin(code, state) {
   if (!r.ok) throw new Error(`ログインを完了できませんでした(${r.status})。`);
   const tok = await r.json();
   store.del('tl.pending');
-  store.set('tl.session', { host: p.host, token: tok.access_token });
+  store.set('tl.session', { host: p.host, token: tok.access_token, scope: tok.scope || '' });
 }
 
 async function logout() {
@@ -144,7 +145,7 @@ async function logout() {
 }
 
 async function loadInstance() {
-  const base = { stream: 'wss://' + S.host, maxChars: 500, maxMedia: 4 };
+  const base = { stream: 'wss://' + S.host, maxChars: 500, maxMedia: 4, vapid: null };
   if (isLocalHost(S.host)) base.stream = 'ws://' + S.host;
   try {
     const r = await fetch(httpBase(S.host) + '/api/v2/instance');
@@ -152,6 +153,7 @@ async function loadInstance() {
       const j = await r.json();
       const c = j.configuration || {};
       if (c.urls && c.urls.streaming) base.stream = c.urls.streaming;
+      if (c.vapid && c.vapid.public_key) base.vapid = c.vapid.public_key;
       if (c.statuses) { base.maxChars = c.statuses.max_characters || 500; base.maxMedia = c.statuses.max_media_attachments || 4; }
       return base;
     }
@@ -707,6 +709,105 @@ cSend.addEventListener('click', async () => {
   } finally { C.sending = false; updateCompose(); }
 });
 
+
+/* ---------- プッシュ通知(アプリを閉じていても届く) ---------- */
+const PUSH_KINDS = ['mention', 'reblog', 'favourite', 'follow'];
+const PUSH_DEFAULT = { mention: true, reblog: true, favourite: true, follow: true, follow_request: true, poll: true, status: false, update: false };
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && typeof Notification !== 'undefined';
+const hasPushScope = () => (S.scope || '').split(/\s+/).includes('push');
+const b64uToBytes = (s) => { const p = '='.repeat((4 - (s.length % 4)) % 4); const b = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
+
+async function getVapidKey() {
+  if (S.vapid) return S.vapid;
+  const app = (store.get('tl.apps') || {})[S.host];
+  if (app && app.vapid) return app.vapid;
+  try { const r = await api('/api/v1/apps/verify_credentials'); if (r.vapid_key) return r.vapid_key; } catch {}
+  throw new Error('このサーバーは通知の設定を公開していません。');
+}
+
+async function pushState() {
+  // 'unsupported' | 'noscope' | 'off' | 'on'
+  if (!pushSupported()) return { s: 'unsupported' };
+  if (!hasPushScope()) return { s: 'noscope' };
+  try {
+    const r = await api('/api/v1/push/subscription');
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub && sub.endpoint === r.endpoint) return { s: 'on', alerts: r.alerts || {} };
+  } catch {}
+  return { s: 'off' };
+}
+
+async function enablePush() {
+  if (Notification.permission === 'denied') throw new Error('通知が拒否されています。iPhoneの「設定」→「通知」→ Tootline で許可してください。');
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('通知が許可されませんでした。');
+  const reg = await navigator.serviceWorker.ready;
+  const old = await reg.pushManager.getSubscription();
+  if (old) { try { await old.unsubscribe(); } catch {} }
+  const key = await getVapidKey();
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(key) });
+  const j = sub.toJSON();
+  const alerts = store.get('tl.pushAlerts') || PUSH_DEFAULT;
+  await api('/api/v1/push/subscription', { method: 'POST', body: {
+    subscription: { endpoint: j.endpoint, keys: { p256dh: j.keys.p256dh, auth: j.keys.auth } },
+    data: { alerts: { ...PUSH_DEFAULT, ...alerts }, policy: 'all' } } });
+}
+
+async function disablePush() {
+  try { await api('/api/v1/push/subscription', { method: 'DELETE' }); } catch {}
+  try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); if (sub) await sub.unsubscribe(); } catch {}
+}
+
+async function refreshPushUi() {
+  const btn = $('#pushBtn'), note = $('#pushNote'), kinds = $('#pushKinds');
+  btn.disabled = true; kinds.hidden = true;
+  const st = await pushState();
+  btn.disabled = false; btn.dataset.s = st.s;
+  if (st.s === 'unsupported') {
+    btn.textContent = '通知は使えません'; btn.disabled = true;
+    note.textContent = 'ホーム画面に追加したTootlineのアイコンから開いたときだけ使えます(iOS 16.4以降)。';
+  } else if (st.s === 'noscope') {
+    btn.textContent = '通知のためにログインし直す';
+    note.textContent = '通知を受け取る権限が必要です。ログインし直すと付与されます。';
+  } else if (st.s === 'on') {
+    btn.textContent = '通知をオフにする';
+    note.textContent = 'アプリを閉じていても通知が届きます。';
+    kinds.hidden = false;
+    for (const k of PUSH_KINDS) $(`#pk-${k}`).checked = st.alerts[k] !== false;
+  } else {
+    btn.textContent = '通知をオンにする';
+    note.textContent = 'アプリを閉じていても、返信やブーストなどを通知します。';
+  }
+}
+
+function wirePush() {
+  $('#pushBtn').addEventListener('click', async (e) => {
+    const b = e.currentTarget, s = b.dataset.s;
+    if (s === 'noscope') { logout(); return; }
+    b.disabled = true;
+    try {
+      if (s === 'on') { await disablePush(); toast('通知をオフにしました'); }
+      else { await enablePush(); toast('通知をオンにしました'); }
+    } catch (err) { toast(err.message); }
+    refreshPushUi();
+  });
+  for (const k of PUSH_KINDS) {
+    $(`#pk-${k}`).addEventListener('change', async () => {
+      const alerts = { ...PUSH_DEFAULT, ...(store.get('tl.pushAlerts') || {}) };
+      for (const x of PUSH_KINDS) alerts[x] = $(`#pk-${x}`).checked;
+      store.set('tl.pushAlerts', alerts);
+      try { await api('/api/v1/push/subscription', { method: 'PUT', body: { data: { alerts } } }); }
+      catch (err) { toast(`変更できませんでした: ${err.message}`); }
+    });
+  }
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'open-notif') { show('notif'); fetchNewer(COLS.notif); }
+    });
+  }
+}
+
 /* ---------- 起動 ---------- */
 function showLogin(msg) {
   $('#login').hidden = false; $('#app').hidden = true;
@@ -730,6 +831,8 @@ async function boot() {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   const q = new URLSearchParams(location.search);
+  const wantTab = q.get('tab');
+  if (wantTab && COLS[wantTab]) { current = wantTab; history.replaceState(null, '', REDIRECT); }
   if (q.has('code') || q.has('error')) {
     const code = q.get('code'), state = q.get('state'), err = q.get('error_description') || q.get('error');
     history.replaceState(null, '', REDIRECT);
@@ -745,13 +848,15 @@ async function boot() {
     S.me = await api('/api/v1/accounts/verify_credentials');
   } catch (e) { if (e.message !== '401') toast('アカウント情報を取得できませんでした'); S.me = { acct: ses.host, avatar: '', display_name: '' }; }
   $('#meImg').src = S.me.avatar_static || S.me.avatar || '';
-  const savedTab = store.get('tl.tab'); if (COLS[savedTab]) current = savedTab;
+  const savedTab = store.get('tl.tab'); if (COLS[savedTab] && !(wantTab && COLS[wantTab])) current = savedTab;
   document.body.dataset.k = current; $('#title').textContent = COLS[current].title;
   for (const t of document.querySelectorAll('.tab')) t.setAttribute('aria-current', String(t.dataset.k === current));
   buildCols();
   for (const t of document.querySelectorAll('.tab')) t.addEventListener('click', () => show(t.dataset.k));
   $('#composeBtn').addEventListener('click', () => openCompose(null));
-  $('#meBtn').addEventListener('click', () => { $('#menuWho').textContent = `@${S.me.acct}@${S.host}`; $('#menu').hidden = false; });
+  $('#meBtn').addEventListener('click', () => { $('#menuWho').textContent = `@${S.me.acct}@${S.host}`; $('#menu').hidden = false; refreshPushUi(); });
+  $('#ver').textContent = `Tootline ${VERSION}`;
+  wirePush();
   $('#menuClose').addEventListener('click', () => { $('#menu').hidden = true; });
   $('#menu').addEventListener('click', (e) => { if (e.target.id === 'menu') $('#menu').hidden = true; });
   $('#logoutBtn').addEventListener('click', logout);

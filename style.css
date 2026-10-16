@@ -178,5 +178,14 @@ button { cursor: pointer; }
 .viewer { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.92); display: grid; place-items: center; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
 .viewer img, .viewer video { max-width: 100%; max-height: 100%; }
 
-.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--tab-h) + env(safe-area-inset-bottom) + 14px); z-index: 60; max-width: 88%;
+.toast { position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top) + 58px); z-index: 60; max-width: 88%;
   padding: 10px 16px; border-radius: 10px; background: var(--ink); color: var(--bg); font-size: 14px; }
+
+.menu-card .note { margin: 0; font-weight: 400; font-size: 12.5px; color: var(--sub); }
+.menu-card .push { display: grid; gap: 6px; }
+.menu-card .push button { background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 700; }
+.menu-card .push button:disabled { opacity: .4; }
+.menu-card fieldset { margin: 4px 0 0; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 8px; display: grid; gap: 6px; }
+.menu-card fieldset legend { font-size: 12.5px; color: var(--sub); padding: 0 4px; }
+.menu-card fieldset label { display: flex; gap: 8px; align-items: center; font-weight: 400; }
+.menu-card { max-height: 100%; overflow-y: auto; }
