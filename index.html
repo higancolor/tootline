@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tootline</title>
+<meta name="theme-color" content="#F4F6F8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tootline">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-k="home">
+
+<!-- ログイン画面 -->
+<main id="login" class="login" hidden>
+  <h1 class="brand">Tootline</h1>
+  <p class="lead">ホーム・ローカル・通知を、自動で更新しつづけるMastodonクライアント。</p>
+  <form id="loginForm" autocomplete="off">
+    <label for="host">インスタンスのドメイン</label>
+    <input id="host" name="host" type="text" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="例: mstdn.jp" required>
+    <button type="submit" class="primary">ログイン</button>
+    <p id="loginError" class="error" role="alert" hidden></p>
+  </form>
+  <aside id="installHint" class="hint-box" hidden>
+    <strong>先にホーム画面に追加してください</strong>
+    <p>Safariの共有ボタンから「ホーム画面に追加」を選び、追加されたTootlineのアイコンを開いてからログインします。Safariでログインしても、ホーム画面のアプリには引き継がれません。</p>
+  </aside>
+</main>
+
+<!-- アプリ本体 -->
+<div id="app" hidden>
+  <header class="bar">
+    <h1 id="title">ホーム</h1>
+    <span id="link" class="link" data-s="connecting"><i></i><span id="linkText">接続中</span></span>
+    <button id="meBtn" class="me" aria-label="アカウント"><img id="meImg" alt=""></button>
+  </header>
+  <div id="cols"></div>
+  <nav class="tabs" aria-label="タイムライン">
+    <button class="tab" data-k="home" aria-current="true">ホーム<b class="badge" hidden></b></button>
+    <button class="tab" data-k="local">ローカル<b class="badge" hidden></b></button>
+    <button class="tab" data-k="notif">通知<b class="badge" hidden></b></button>
+    <button id="composeBtn" class="compose-btn">投稿</button>
+  </nav>
+</div>
+
+<!-- アカウントメニュー -->
+<div id="menu" class="menu" hidden>
+  <div class="menu-card">
+    <p id="menuWho"></p>
+    <button id="reloadBtn">タイムラインを読み込み直す</button>
+    <button id="logoutBtn" class="danger">ログアウト</button>
+    <button id="menuClose">閉じる</button>
+  </div>
+</div>
+
+<!-- 投稿画面 -->
+<section id="composer" class="composer" hidden aria-label="投稿">
+  <div class="c-top">
+    <button id="cCancel" class="plain">キャンセル</button>
+    <span id="cCount" class="count"></span>
+    <button id="cSend" class="primary small" disabled>投稿する</button>
+  </div>
+  <div id="cReply" class="c-reply" hidden></div>
+  <input id="cCw" class="c-cw" type="text" placeholder="警告の文言(CW)" hidden>
+  <textarea id="cText" placeholder="いまどうしてる?" rows="6"></textarea>
+  <div id="cMedia" class="c-media"></div>
+  <div class="c-tools">
+    <label class="tool">画像・動画<input id="cFile" type="file" accept="image/*,video/*" multiple hidden></label>
+    <button id="cCwBtn" class="tool" type="button">CW</button>
+    <label class="tool sens" id="cSensWrap" hidden><input id="cSens" type="checkbox"> センシティブ</label>
+    <select id="cVis" aria-label="公開範囲">
+      <option value="public">公開</option>
+      <option value="unlisted">ひかえめ(未収載)</option>
+      <option value="private">フォロワー限定</option>
+      <option value="direct">メンションした人だけ</option>
+    </select>
+  </div>
+</section>
+
+<!-- 画像ビューア -->
+<div id="viewer" class="viewer" hidden></div>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
