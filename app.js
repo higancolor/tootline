@@ -4,7 +4,7 @@
 
 const APP_NAME = 'Tootline';
 const SCOPES = 'read write push';
-const VERSION = '0.8';
+const VERSION = '0.9';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 const POLL_MS = 30000;      // 画面を開いている間の取りこぼし確認の間隔
 const KEEP = 300;           // 1つのタイムラインに保持する最大件数
@@ -274,6 +274,12 @@ const VW_CSS = `
 .content img:not(.emoji), .content video, .content table { max-width: 100%; }
 .content pre { max-width: 100%; overflow-x: auto; }
 html, body { overflow-x: hidden; }
+.col { touch-action: pan-y pinch-zoom; }
+@keyframes inl { from { transform: translateX(36px); opacity: .4; } to { transform: none; opacity: 1; } }
+@keyframes inr { from { transform: translateX(-36px); opacity: .4; } to { transform: none; opacity: 1; } }
+.col.in-l { animation: inl .2s ease-out; }
+.col.in-r { animation: inr .2s ease-out; }
+@media (prefers-reduced-motion: reduce) { .col.in-l, .col.in-r { animation: none; } }
 .vw-count { position: absolute; top: calc(env(safe-area-inset-top) + 21px); left: 16px; z-index: 2; color: #fff; font-size: 14px; font-variant-numeric: tabular-nums; }
 `;
 (function injectViewerStyles() { const st = document.createElement('style'); st.textContent = VW_CSS; document.head.append(st); })();
@@ -645,7 +651,7 @@ function tickTimes() {
 }
 
 /* ---------- タブ・メニュー ---------- */
-function show(k) {
+function show(k, dir) {
   if (k === current) {
     const c = COLS[k];
     c.scroller.scrollTo({ top: 0, behavior: 'smooth' });
@@ -661,6 +667,32 @@ function show(k) {
   if (c.scroller.scrollTop < 8) { c.unread = 0; c.pending = 0; }
   onScroll(c); refreshBadges();
   store.set('tl.tab', k);
+  if (dir) { // スワイプで切り替えたときだけ、新しい列が横からすっと入る
+    const sc = c.scroller; sc.classList.remove('in-l', 'in-r'); void sc.offsetWidth; sc.classList.add(dir === 'l' ? 'in-l' : 'in-r');
+  }
+}
+
+
+/* ---------- 左右スワイプでホーム・ローカル・通知を切り替え ---------- */
+const TAB_ORDER = ['home', 'local', 'notif'];
+function wireSwipe() {
+  const host = $('#cols');
+  let sx = 0, sy = 0, t0 = 0, on = false;
+  host.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    // 2本指・コードや動画の上・画面の左端(iPhoneの「戻る」スワイプ)から始まった操作は対象外
+    if (e.touches.length !== 1 || t.clientX < 24 || e.target.closest('pre, video')) { on = false; return; }
+    sx = t.clientX; sy = t.clientY; t0 = Date.now(); on = true;
+  }, { passive: true });
+  host.addEventListener('touchend', (e) => {
+    if (!on) return; on = false;
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || Date.now() - t0 > 700) return;
+    const i = TAB_ORDER.indexOf(current) + (dx < 0 ? 1 : -1);
+    if (i < 0 || i >= TAB_ORDER.length) return;
+    show(TAB_ORDER[i], dx < 0 ? 'l' : 'r');
+  }, { passive: true });
+  host.addEventListener('touchcancel', () => { on = false; }, { passive: true });
 }
 
 /* ---------- 投稿 ---------- */
@@ -1137,6 +1169,7 @@ async function boot() {
   document.body.dataset.k = current; $('#title').textContent = COLS[current].title;
   for (const t of document.querySelectorAll('.tab')) t.setAttribute('aria-current', String(t.dataset.k === current));
   buildCols();
+  wireSwipe();
   for (const t of document.querySelectorAll('.tab')) t.addEventListener('click', () => show(t.dataset.k));
   $('#composeBtn').addEventListener('click', () => openCompose(null));
   $('#meBtn').addEventListener('click', () => { $('#menuWho').textContent = `@${S.me.acct}@${S.host}`; $('#menu').hidden = false; refreshPushUi(); });
