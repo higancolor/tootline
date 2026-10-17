@@ -4,7 +4,7 @@
 
 const APP_NAME = 'Tootline';
 const SCOPES = 'read write push';
-const VERSION = '0.6';
+const VERSION = '0.8';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 const POLL_MS = 30000;      // 画面を開いている間の取りこぼし確認の間隔
 const KEEP = 300;           // 1つのタイムラインに保持する最大件数
@@ -251,6 +251,10 @@ function mediaBlock(s) {
       if (b.classList.contains('sens')) { b.classList.remove('sens'); return; }
       openViewer(items, items.indexOf(m));
     });
+    if (items.length === 1) { // 1枚だけの画像は横幅いっぱいに(左右のグレーの余白をなくす)
+      const ar = (m.meta && ((m.meta.small && m.meta.small.aspect) || (m.meta.original && m.meta.original.aspect))) || 1.6;
+      b.style.setProperty('--ar', String(Math.min(2.2, Math.max(0.8, ar))));
+    }
     box.append(b);
   }
   return box;
@@ -263,6 +267,13 @@ const VW_CSS = `
 .vw-slide { flex: 0 0 100%; width: 100%; height: 100%; scroll-snap-align: center; scroll-snap-stop: always; display: grid; place-items: center; padding: calc(env(safe-area-inset-top) + 60px) 0 calc(env(safe-area-inset-bottom) + 24px); }
 .vw-slide img, .vw-slide video { max-width: 100%; max-height: 100%; object-fit: contain; }
 .vw-close { position: absolute; top: calc(env(safe-area-inset-top) + 10px); right: 12px; z-index: 2; width: 44px; height: 44px; border: 0; border-radius: 50%; background: rgba(255,255,255,.2); color: #fff; font-size: 28px; line-height: 1; padding: 0; }
+.media.n1 .m { aspect-ratio: var(--ar, 1.6); max-height: none; }
+.media.n1 img, .media.n1 video { object-fit: cover; max-height: none; }
+.col, .prof-scroll { overflow-x: hidden; }
+.list, .post, .pb, .content, .media { min-width: 0; max-width: 100%; }
+.content img:not(.emoji), .content video, .content table { max-width: 100%; }
+.content pre { max-width: 100%; overflow-x: auto; }
+html, body { overflow-x: hidden; }
 .vw-count { position: absolute; top: calc(env(safe-area-inset-top) + 21px); left: 16px; z-index: 2; color: #fff; font-size: 14px; font-variant-numeric: tabular-nums; }
 `;
 (function injectViewerStyles() { const st = document.createElement('style'); st.textContent = VW_CSS; document.head.append(st); })();
@@ -415,6 +426,7 @@ function buildCols() {
 
 function onScroll(c) {
   const sc = c.scroller;
+  if (sc.scrollLeft) sc.scrollLeft = 0; // 横にずれたら必ず元に戻す
   if (sc.scrollTop < 8) { c.pending = 0; if (c.key === current) c.unread = 0; refreshBadges(); }
   c.pill.hidden = c.pending === 0;
   c.pill.textContent = `新着 ${c.pending}件`;
