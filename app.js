@@ -4,7 +4,7 @@
 
 const APP_NAME = 'Tootline';
 const SCOPES = 'read write push';
-const VERSION = '1.0';
+const VERSION = '1.1';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 const POLL_MS = 30000;      // 画面を開いている間の取りこぼし確認の間隔
 const KEEP = 300;           // 1つのタイムラインに保持する最大件数
@@ -271,6 +271,7 @@ const VW_CSS = `
 .media.n1 .m { aspect-ratio: var(--ar, 1.6); max-height: none; }
 .media.n1 img, .media.n1 video { object-fit: cover; max-height: none; }
 .col, .prof-scroll { overflow-x: hidden; }
+.media img, .media video { pointer-events: none; -webkit-user-drag: none; -webkit-touch-callout: none; user-select: none; }
 .list, .post, .pb, .content, .media { min-width: 0; max-width: 100%; }
 .content img:not(.emoji), .content video, .content table { max-width: 100%; }
 .content pre { max-width: 100%; overflow-x: auto; }
@@ -709,8 +710,8 @@ function wireSwipe() {
   let sx = 0, sy = 0, t0 = 0, dx = 0, mode = null; // mode: null | 'wait' | 'h'(横にドラッグ中) | 'v'(縦スクロール)
   host.addEventListener('touchstart', (e) => {
     const t = e.touches[0];
-    // 2本指・コードや動画の上・画面の左端(iPhoneの「戻る」スワイプ)から始まった操作は対象外
-    if (e.touches.length !== 1 || t.clientX < 24 || e.target.closest('pre, video')) { mode = null; return; }
+    // 2本指・コードの上・画面の左端(iPhoneの「戻る」スワイプ)から始まった操作は対象外
+    if (e.touches.length !== 1 || t.clientX < 24 || e.target.closest('pre')) { mode = null; return; }
     sx = t.clientX; sy = t.clientY; t0 = Date.now(); dx = 0; mode = 'wait';
   }, { passive: true });
   host.addEventListener('touchmove', (e) => {
