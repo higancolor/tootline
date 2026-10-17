@@ -4,7 +4,7 @@
 
 const APP_NAME = 'Tootline';
 const SCOPES = 'read write push';
-const VERSION = '1.1';
+const VERSION = '1.3';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 const POLL_MS = 30000;      // 画面を開いている間の取りこぼし確認の間隔
 const KEEP = 300;           // 1つのタイムラインに保持する最大件数
@@ -287,6 +287,41 @@ html, body { overflow-x: hidden; }
 .vw-count { position: absolute; top: calc(env(safe-area-inset-top) + 21px); left: 16px; z-index: 2; color: #fff; font-size: 14px; font-variant-numeric: tabular-nums; }
 `;
 (function injectViewerStyles() { const st = document.createElement('style'); st.textContent = VW_CSS; document.head.append(st); })();
+
+// 背景テーマ: 白 / 黒 / 動画色(青みのグレー)。選んだものを覚えておく
+const THEMES = {
+  white: { name: '白', bg: '#F4F6F8', css: ':root, :root * { color-scheme: light; } :root { --bg:#F4F6F8; --surface:#FFFFFF; --ink:#101820; --sub:#5B6773; --rule:#DDE2E8; --home:#0B6BCB; --local:#138A5B; --notif:#D9530A; --danger:#C62828; }' },
+  black: { name: '黒', bg: '#000000', css: ':root, :root * { color-scheme: dark; } :root { --bg:#000000; --surface:#0E0E10; --ink:#EDEFF5; --sub:#9AA0AE; --rule:#26282E; --home:#5AA9FF; --local:#3DD68C; --notif:#FF9A52; --danger:#FF6B6B; }' },
+  video: { name: 'グレー', bg: '#282B36', css: ':root, :root * { color-scheme: dark; } :root { --bg:#282B36; --surface:#313543; --ink:#EDEFF5; --sub:#9BA3B5; --rule:#424A5A; --home:#5AA9FF; --local:#3DD68C; --notif:#FF9A52; --danger:#FF6B6B; }' },
+};
+const themeStyle = document.createElement('style');
+document.head.append(themeStyle);
+function applyTheme(k) {
+  const t = THEMES[k] || THEMES.video;
+  themeStyle.textContent = t.css + ` html, body { background:${t.bg}; } .pill, .badge { color:${k === 'white' ? '#fff' : '#101820'}; }`;
+  document.querySelectorAll('meta[name=theme-color]').forEach((m) => m.setAttribute('content', t.bg));
+  document.querySelectorAll('#themeSel button').forEach((b) => b.classList.toggle('on', b.dataset.t === k));
+}
+let curTheme = 'video';
+try { curTheme = localStorage.getItem('tootline.theme') || 'video'; } catch {}
+applyTheme(curTheme);
+function wireTheme() {
+  const card = $('.menu-card');
+  const box = el('div', { id: 'themeSel' });
+  box.style.cssText = 'display:flex;gap:8px;margin:12px 0';
+  for (const k of ['white', 'black', 'video']) {
+    const b = el('button', { type: 'button', text: THEMES[k].name });
+    b.dataset.t = k;
+    b.style.cssText = 'flex:1;padding:10px 0;border-radius:8px;border:2px solid var(--rule);background:' + THEMES[k].bg + ';color:' + (k === 'white' ? '#101820' : '#EDEFF5') + ';font-weight:700';
+    b.addEventListener('click', () => { curTheme = k; try { localStorage.setItem('tootline.theme', k); } catch {} applyTheme(k); });
+    box.append(b);
+  }
+  card.insertBefore(box, $('#menuClose'));
+  const st = document.createElement('style');
+  st.textContent = '#themeSel button.on { border-color: var(--home) !important; }';
+  document.head.append(st);
+  applyTheme(curTheme);
+}
 
 function closeViewer() {
   const v = $('#viewer');
@@ -1223,6 +1258,7 @@ async function boot() {
   $('#composeBtn').addEventListener('click', () => openCompose(null));
   $('#meBtn').addEventListener('click', () => { $('#menuWho').textContent = `@${S.me.acct}@${S.host}`; $('#menu').hidden = false; refreshPushUi(); });
   $('#ver').textContent = `Tootline ${VERSION}`;
+  wireTheme();
   if (S.me && S.me.id) {
     const pb = el('button', { type: 'button', id: 'profBtn', text: '自分のプロフィール' });
     pb.addEventListener('click', () => { $('#menu').hidden = true; openProfile(S.me.id); });
