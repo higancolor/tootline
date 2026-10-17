@@ -4,7 +4,7 @@
 
 const APP_NAME = 'Tootline';
 const SCOPES = 'read write push';
-const VERSION = '0.9';
+const VERSION = '1.0';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 const POLL_MS = 30000;      // 画面を開いている間の取りこぼし確認の間隔
 const KEEP = 300;           // 1つのタイムラインに保持する最大件数
@@ -140,6 +140,7 @@ async function logout() {
         body: JSON.stringify({ client_id: app.client_id, client_secret: app.client_secret, token: ses.token }) });
     } catch {}
   }
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith('tl.cache.')) store.del(k); } catch {}
   store.del('tl.session');
   location.replace(REDIRECT);
 }
@@ -274,7 +275,9 @@ const VW_CSS = `
 .content img:not(.emoji), .content video, .content table { max-width: 100%; }
 .content pre { max-width: 100%; overflow-x: auto; }
 html, body { overflow-x: hidden; }
-.col { touch-action: pan-y pinch-zoom; }
+.col { touch-action: pan-y pinch-zoom; visibility: visible; will-change: transform; transition: transform .24s cubic-bezier(.22,.8,.26,1); }
+#cols { overflow: hidden; }
+.col:not(.on) { pointer-events: none; }
 @keyframes inl { from { transform: translateX(36px); opacity: .4; } to { transform: none; opacity: 1; } }
 @keyframes inr { from { transform: translateX(-36px); opacity: .4; } to { transform: none; opacity: 1; } }
 .col.in-l { animation: inl .2s ease-out; }
@@ -422,7 +425,7 @@ function buildCols() {
       pending: 0, unread: 0, loaded: false });
     c.list = el('ul', { class: 'list' });
     c.pill = el('button', { class: 'pill', type: 'button', hidden: true });
-    c.state = el('div', { class: 'state', text: '読み込み中…' });
+    c.state = el('div', { class: 'state', hidden: true });
     c.scroller = el('section', { class: 'col' + (k === current ? ' on' : ''), 'data-k': k, 'aria-label': c.title }, c.pill, c.list, c.state);
     c.scroller.addEventListener('scroll', () => onScroll(c), { passive: true });
     c.pill.addEventListener('click', () => { c.scroller.scrollTo({ top: 0, behavior: 'smooth' }); });
@@ -482,7 +485,8 @@ function addItems(c, items, mode) {
     onScroll(c); refreshBadges();
     if (prevTop <= 8) trim(c);
   }
-  c.state.hidden = c.list.children.length > 0;
+  c.state.hidden = c.list.children.length > 0 && !c.state.textContent;
+  saveCache();
   return fresh.length;
 }
 
@@ -535,6 +539,24 @@ async function loadOlder(c) {
 }
 
 const catchUpAll = () => Promise.all(Object.values(COLS).map(fetchNewer));
+
+// 前回のタイムラインを端末に控えておき、次に開いたとき最初から表示する(読み込み待ちの空白を出さない)
+const cacheKey = () => `tl.cache.${S.host}.${S.me && S.me.id}`;
+let saveTimer;
+function saveCache() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const out = {};
+    for (const [k, c] of Object.entries(COLS)) out[k] = [...c.list.children].slice(0, 40).map((li) => c.byId.get(li.dataset.id)).filter(Boolean);
+    store.set(cacheKey(), out);
+  }, 1500);
+}
+function restoreCache() {
+  const d = store.get(cacheKey());
+  if (!d) return;
+  for (const [k, c] of Object.entries(COLS)) if (d[k] && d[k].length) { addItems(c, d[k], 'initial'); c.loaded = true; }
+}
+
 
 function removeStatus(id) {
   for (const c of Object.values(COLS)) {
@@ -667,32 +689,56 @@ function show(k, dir) {
   if (c.scroller.scrollTop < 8) { c.unread = 0; c.pending = 0; }
   onScroll(c); refreshBadges();
   store.set('tl.tab', k);
-  if (dir) { // スワイプで切り替えたときだけ、新しい列が横からすっと入る
-    const sc = c.scroller; sc.classList.remove('in-l', 'in-r'); void sc.offsetWidth; sc.classList.add(dir === 'l' ? 'in-l' : 'in-r');
-  }
+  layoutCols(0, true);
+  for (const [key, col] of Object.entries(COLS)) col.scroller.setAttribute('aria-hidden', String(key !== k));
 }
 
 
-/* ---------- 左右スワイプでホーム・ローカル・通知を切り替え ---------- */
+/* ---------- 左右スワイプ: 指に列がついてきて、隣の列が見える(Subway Tooter風) ---------- */
 const TAB_ORDER = ['home', 'local', 'notif'];
+function layoutCols(dx = 0, animate = true) {
+  const cur = TAB_ORDER.indexOf(current);
+  TAB_ORDER.forEach((k, i) => {
+    const sc = COLS[k].scroller;
+    sc.style.transition = animate ? '' : 'none';
+    sc.style.transform = `translate3d(calc(${(i - cur) * 100}% + ${dx}px), 0, 0)`;
+  });
+}
 function wireSwipe() {
   const host = $('#cols');
-  let sx = 0, sy = 0, t0 = 0, on = false;
+  let sx = 0, sy = 0, t0 = 0, dx = 0, mode = null; // mode: null | 'wait' | 'h'(横にドラッグ中) | 'v'(縦スクロール)
   host.addEventListener('touchstart', (e) => {
     const t = e.touches[0];
     // 2本指・コードや動画の上・画面の左端(iPhoneの「戻る」スワイプ)から始まった操作は対象外
-    if (e.touches.length !== 1 || t.clientX < 24 || e.target.closest('pre, video')) { on = false; return; }
-    sx = t.clientX; sy = t.clientY; t0 = Date.now(); on = true;
+    if (e.touches.length !== 1 || t.clientX < 24 || e.target.closest('pre, video')) { mode = null; return; }
+    sx = t.clientX; sy = t.clientY; t0 = Date.now(); dx = 0; mode = 'wait';
   }, { passive: true });
-  host.addEventListener('touchend', (e) => {
-    if (!on) return; on = false;
-    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
-    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || Date.now() - t0 > 700) return;
-    const i = TAB_ORDER.indexOf(current) + (dx < 0 ? 1 : -1);
-    if (i < 0 || i >= TAB_ORDER.length) return;
-    show(TAB_ORDER[i], dx < 0 ? 'l' : 'r');
+  host.addEventListener('touchmove', (e) => {
+    if (mode !== 'wait' && mode !== 'h') return;
+    const t = e.touches[0], mx = t.clientX - sx, my = t.clientY - sy;
+    if (mode === 'wait') {
+      if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+      mode = Math.abs(mx) > Math.abs(my) * 1.2 ? 'h' : 'v';
+      if (mode === 'v') return;
+    }
+    const i = TAB_ORDER.indexOf(current);
+    const edge = (mx > 0 && i === 0) || (mx < 0 && i === TAB_ORDER.length - 1);
+    dx = edge ? mx * 0.25 : mx; // 端では重くして「これ以上ない」と伝える
+    layoutCols(dx, false);
   }, { passive: true });
-  host.addEventListener('touchcancel', () => { on = false; }, { passive: true });
+  const end = (cancelled) => {
+    if (mode !== 'h') { mode = null; return; }
+    mode = null;
+    const w = host.clientWidth || 1, dt = Math.max(1, Date.now() - t0);
+    const fast = Math.abs(dx) > 30 && Math.abs(dx) / dt > 0.45;
+    let i = TAB_ORDER.indexOf(current);
+    if (!cancelled && (Math.abs(dx) > w * 0.25 || fast)) i += dx < 0 ? 1 : -1;
+    i = Math.max(0, Math.min(TAB_ORDER.length - 1, i));
+    dx = 0;
+    if (TAB_ORDER[i] !== current) show(TAB_ORDER[i]); else layoutCols(0, true);
+  };
+  host.addEventListener('touchend', () => end(false), { passive: true });
+  host.addEventListener('touchcancel', () => end(true), { passive: true });
 }
 
 /* ---------- 投稿 ---------- */
@@ -1169,7 +1215,9 @@ async function boot() {
   document.body.dataset.k = current; $('#title').textContent = COLS[current].title;
   for (const t of document.querySelectorAll('.tab')) t.setAttribute('aria-current', String(t.dataset.k === current));
   buildCols();
+  layoutCols(0, false);
   wireSwipe();
+  restoreCache();
   for (const t of document.querySelectorAll('.tab')) t.addEventListener('click', () => show(t.dataset.k));
   $('#composeBtn').addEventListener('click', () => openCompose(null));
   $('#meBtn').addEventListener('click', () => { $('#menuWho').textContent = `@${S.me.acct}@${S.host}`; $('#menu').hidden = false; refreshPushUi(); });
@@ -1185,7 +1233,7 @@ async function boot() {
   $('#logoutBtn').addEventListener('click', logout);
   $('#reloadBtn').addEventListener('click', () => {
     $('#menu').hidden = true;
-    for (const c of Object.values(COLS)) { c.byId.clear(); c.list.textContent = ''; c.newest = c.oldest = null; c.ended = false; c.loaded = false; c.pending = c.unread = 0; c.state.hidden = false; c.state.textContent = '読み込み中…'; }
+    for (const c of Object.values(COLS)) { c.byId.clear(); c.list.textContent = ''; c.newest = c.oldest = null; c.ended = false; c.loaded = false; c.pending = c.unread = 0; c.state.hidden = true; c.state.textContent = ''; }
     refreshBadges(); catchUpAll();
   });
   await catchUpAll();
