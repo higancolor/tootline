@@ -4,7 +4,7 @@
 
 const APP_NAME = 'Tootline';
 const SCOPES = 'read write push';
-const VERSION = '1.3';
+const VERSION = '1.4';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 const POLL_MS = 30000;      // 画面を開いている間の取りこぼし確認の間隔
 const KEEP = 300;           // 1つのタイムラインに保持する最大件数
@@ -867,6 +867,23 @@ $('#cCwBtn').addEventListener('click', (e) => {
 });
 $('#cCancel').addEventListener('click', () => { if (C.edit) resetComposer(); closeCompose(); });
 
+// 大きすぎる写真は、アップロード前に長辺2048pxへ縮小する(失敗したら元のまま送る)
+async function shrinkImage(f, max = 2048) {
+  if (!/^image\/(jpeg|png|heic|heif|webp)$/i.test(f.type)) return f;
+  try {
+    const bmp = await createImageBitmap(f, { imageOrientation: 'from-image' });
+    const sc = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    if (sc >= 1 && f.size < 4 * 1024 * 1024) { bmp.close?.(); return f; }
+    const w = Math.round(bmp.width * sc), h = Math.round(bmp.height * sc);
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    cv.getContext('2d').drawImage(bmp, 0, 0, w, h); bmp.close?.();
+    const png = /png/i.test(f.type);
+    const blob = await new Promise((ok) => cv.toBlob(ok, png ? 'image/png' : 'image/jpeg', 0.9));
+    if (!blob) return f;
+    return new File([blob], f.name.replace(/\.[^.]+$/, '') + (png ? '.png' : '.jpg'), { type: blob.type });
+  } catch { return f; }
+}
+
 $('#cFile').addEventListener('change', async (e) => {
   const files = [...e.target.files]; e.target.value = '';
   for (const f of files) {
@@ -874,7 +891,7 @@ $('#cFile').addEventListener('change', async (e) => {
     const m = { id: null, file: f, alt: '' };
     C.media.push(m); renderMedia(); updateCompose();
     try {
-      const fd = new FormData(); fd.append('file', f);
+      const fd = new FormData(); fd.append('file', await shrinkImage(f), f.name);
       let r = await api('/api/v2/media', { method: 'POST', body: fd });
       for (let i = 0; r.__status === 202 && i < 60; i++) {
         await new Promise((ok) => setTimeout(ok, 1500));
