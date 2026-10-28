@@ -4,7 +4,7 @@
 
 const APP_NAME = 'Tootline';
 const SCOPES = 'read write push';
-const VERSION = '1.4';
+const VERSION = '1.5';
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
 const POLL_MS = 30000;      // 画面を開いている間の取りこぼし確認の間隔
 const KEEP = 300;           // 1つのタイムラインに保持する最大件数
@@ -496,6 +496,29 @@ function renderItem(c, it) {
   return li;
 }
 
+// アプリを開いている間に通知が来たら、画面の上にポップアップで知らせる(タップで通知タブへ)
+let popTimer;
+function popupNotif(list) {
+  if (document.visibilityState !== 'visible') return;
+  const n = list[0];
+  const a = n.account || {};
+  const name = a.display_name || a.username || '';
+  const snip = n.status && n.status.content ? new DOMParser().parseFromString(n.status.content, 'text/html').body.textContent.trim().slice(0, 40) : '';
+  let box = document.getElementById('notifPop');
+  if (!box) {
+    box = el('div', { id: 'notifPop' });
+    box.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 8px);z-index:70;width:92%;max-width:420px;padding:10px 14px;border-radius:12px;background:var(--surface);color:var(--ink);border:1px solid var(--rule);box-shadow:0 6px 20px rgba(0,0,0,.35);font-size:14px;line-height:1.4;cursor:pointer';
+    box.addEventListener('click', () => { box.hidden = true; show('notif'); });
+    document.body.append(box);
+  }
+  box.textContent = '';
+  box.append(el('b', { text: name }), (NOTICE[n.type] || '') + (list.length > 1 ? `(ほか${list.length - 1}件)` : ''));
+  if (snip) box.append(el('div', { text: snip, style: 'color:var(--sub);font-size:13px;margin-top:2px' }));
+  box.hidden = false;
+  clearTimeout(popTimer);
+  popTimer = setTimeout(() => { box.hidden = true; }, 4500);
+}
+
 function addItems(c, items, mode) {
   const fresh = items.filter((x) => x && !c.byId.has(x.id));
   if (!fresh.length) return 0;
@@ -518,6 +541,7 @@ function addItems(c, items, mode) {
       c.pending += fresh.length;
     }
     if (c.key !== current) c.unread += fresh.length;
+    if (c.key === 'notif' && current !== 'notif') popupNotif(fresh);
     onScroll(c); refreshBadges();
     if (prevTop <= 8) trim(c);
   }
